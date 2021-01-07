@@ -44,7 +44,7 @@ def gen_strike_table(author, amnt, cursor):
         i += 1
     return reply_body
 
-def process_user(reddit, cursor, connection, author, source):
+def process_user(reddit, cursor, connection, author, source, comment_obj):
     global amount_of_strikes
     cursor.execute("""SELECT username FROM users WHERE username=:username""",
                    {"username": author})  # Does this person already exist?
@@ -60,10 +60,10 @@ def process_user(reddit, cursor, connection, author, source):
     elif amount_of_strikes > 2:
         # send mod mail
         reddit.subreddit(subreddit).message("A user has reached or exceeded 3 strikes!", f"Hello!\n\nA user has reached 3 or more strikes and has been banned!\n\nHere was their final strike: {source}")
+        comment_obj.banned.add(author, ban_reason=f"User exceeded 3 strikes! Their final strike was {source}")
 
 
-
-def scan_comments(reddit, cursor, connection, streamobj): ##TODO: need to add scanning of inbox too for manual strikes
+def scan_comments(reddit, cursor, connection, comment_obj): ##TODO: need to add scanning of inbox too for manual strikes
     ## FIXME: need to get both for loops to work at the same time so that both the comments and the inbox are scanned when using the bot
 
     pm_err_msg = f"""Sorry, I didn't understand your message!\n\n
@@ -72,7 +72,7 @@ def scan_comments(reddit, cursor, connection, streamobj): ##TODO: need to add sc
     !strike u/username <reason> <link to rule breaking content>\n\n
     Username is not case sensitive. Source URL must contain 'reddit.com'."""
 
-    for comment in streamobj:
+    for comment in comment_obj.stream.comments(skip_existing=True):
         body = comment.body
         initiator = comment.author.name.lower()
         try:
@@ -84,7 +84,7 @@ def scan_comments(reddit, cursor, connection, streamobj): ##TODO: need to add sc
                 reason = " ".join(raw_reason)
                 if reason == "":
                     reason = "<None Given>"
-                process_user(reddit, cursor, connection, author, source)
+                process_user(reddit, cursor, connection, author, source, comment_obj)
                 add_strike(cursor, author, reason, source)
                 connection.commit()
                 bot_comment = comment.reply(gen_strike_table(author, amount_of_strikes, cursor))
@@ -109,7 +109,7 @@ def scan_comments(reddit, cursor, connection, streamobj): ##TODO: need to add sc
                             pm.mark_read()
                             break
                         add_strike(cursor, author, reason, source)
-                        process_user(reddit, cursor, connection, author, source)
+                        process_user(reddit, cursor, connection, author, source, comment_obj)
                         pm.reply(gen_strike_table(author, amount_of_strikes, cursor))
                         pm.mark_read()
                     else:
@@ -130,7 +130,7 @@ def initialise():
                              username=config.get("ACCOUNT", "USERNAME"),
                              password=config.get("ACCOUNT", "PASSWORD"),
                              user_agent="3StrikesBot, created by u/ItsTheRedditPolice")
-        comment_stream = reddit.subreddit(subreddit).stream.comments(skip_existing=True)
+        comment_obj = reddit.subreddit(subreddit)
         user = reddit.user.me()
         print(f"Signed in as: {user}")
 
@@ -145,7 +145,7 @@ def initialise():
             moderators.append(str(mod).lower())
         print("Bot is now running!")
         ## Grab comments
-        scan_comments(reddit, cursor, connection, comment_stream)
+        scan_comments(reddit, cursor, connection, comment_obj)
 
     except (prawcore.exceptions.OAuthException, prawcore.exceptions.ResponseException) as e:
         print(f"WARNING: Could not log in to the Reddit account. Make sure the details are correct!\nPress any key to exit.\n\nError: {e}")
