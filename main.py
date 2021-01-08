@@ -11,15 +11,16 @@ subreddit = config.get("SUBREDDIT", "NAME")
 
 moderators = []
 
-command_word = "!strike"# the space at the end is needed to correctly parse the reason from comment
+command_word = "!strike"
 
 subject_secret = "strike" # this must be the subject in order to strike someone privately by pming the bot
 
 
 
 
-def add_strike(cursor, author, reason, source):
+def add_strike(cursor, author, reason, source, connection):
     cursor.execute("""INSERT INTO strikes VALUES (NULL, :reason, :source, (SELECT id FROM users WHERE username=:username))""", {"username": author, "reason": reason, "source": source})
+    connection.commit()
 
 def count_amount_of_strikes(cursor, author):
     cursor.execute(
@@ -39,38 +40,47 @@ def gen_strike_table(author, amnt, cursor):
 
     i = 1
     for source, reason in list_of_sources:
-        table_row = f"|{i}|{reason}|[Link](https://www.reddit.com{source})|\n"
+        table_row = f"|{i}|{reason}|[Link]({source})|\n"
         reply_body = reply_body + table_row
         i += 1
     return reply_body
 
-def process_user(reddit, cursor, connection, author, source, comment_obj):
-    global amount_of_strikes
+def check_if_user_is_known(cursor, author, connection):
     cursor.execute("""SELECT username FROM users WHERE username=:username""",
                    {"username": author})  # Does this person already exist?
     exist = cursor.fetchone()
+    if exist is None:  # if this person does not exist in the database
+        cursor.execute("""INSERT INTO users VALUES (NULL, :username)""", {"username": author})  # add this user to DB
+        connection.commit()
+
+
+def process_user(reddit, cursor, author, source, comment_obj):
+    global amount_of_strikes
     amount_of_strikes = count_amount_of_strikes(cursor, author)
     if amount_of_strikes:
         amount_of_strikes = amount_of_strikes[0]
     else:
         amount_of_strikes = 1
-    if exist is None:  # if this person does not exist in the database
-        cursor.execute("""INSERT INTO users VALUES (NULL, :username)""", {"username": author})  # add this user to DB
-        connection.commit()
-    elif amount_of_strikes > 2:
+
+    if amount_of_strikes >= 3:
         # send mod mail
-        reddit.subreddit(subreddit).message("A user has reached or exceeded 3 strikes!", f"Hello!\n\nA user has reached 3 or more strikes and has been banned!\n\nHere was their final strike: {source}")
-        comment_obj.banned.add(author, ban_reason=f"User exceeded 3 strikes! Their final strike was {source}")
+        try:
+            reddit.subreddit(subreddit).message("A user has reached or exceeded 3 strikes!", f"Hello!\n\nA user has reached 3 or more strikes and has been banned!\n\nHere was their final strike: {source}")
+            comment_obj.banned.add(author, ban_reason="Exceeded 3 Strikes", ban_message="Automated ban due to exceeding 3 strikes. Contact the moderators if there has been a mistake.", note=f"Their final strike was {source}")
+        except Exception as e:
+            print(f"ERROR: Couldn't ban user {author}. - {e}")
 
 
-def scan_comments(reddit, cursor, connection, comment_obj): ##TODO: need to add scanning of inbox too for manual strikes
-    ## FIXME: need to get both for loops to work at the same time so that both the comments and the inbox are scanned when using the bot
+
+
+def scan_comments(reddit, cursor, connection, comment_obj):
+
 
     pm_err_msg = f"""Sorry, I didn't understand your message!\n\n
-    Please make sure you are using the proper syntax and subject!\n\n
-    Subject must be "strike" (No quotes, Not case sensitive.)\n\n
-    !strike u/username <reason> <link to rule breaking content>\n\n
-    Username is not case sensitive. Source URL must contain 'reddit.com'."""
+Please make sure you are using the proper syntax and subject!\n\n
+Subject must be "strike" (No quotes, Not case sensitive.)\n\n
+!strike u/username <reason> <link to rule breaking content>\n\n
+Username is not case sensitive. Source URL must contain 'reddit.com'."""
 
     for comment in comment_obj.stream.comments(skip_existing=True):
         body = comment.body
@@ -84,9 +94,9 @@ def scan_comments(reddit, cursor, connection, comment_obj): ##TODO: need to add 
                 reason = " ".join(raw_reason)
                 if reason == "":
                     reason = "<None Given>"
-                process_user(reddit, cursor, connection, author, source, comment_obj)
-                add_strike(cursor, author, reason, source)
-                connection.commit()
+                check_if_user_is_known(cursor, author, connection)
+                add_strike(cursor, author, reason, source, connection)
+                process_user(reddit, cursor, author, source, comment_obj)
                 bot_comment = comment.reply(gen_strike_table(author, amount_of_strikes, cursor))
                 bot_comment.mod.distinguish(how="yes", sticky=False)
 
@@ -108,8 +118,9 @@ def scan_comments(reddit, cursor, connection, comment_obj): ##TODO: need to add 
                             pm.reply(pm_err_msg)
                             pm.mark_read()
                             break
-                        add_strike(cursor, author, reason, source)
-                        process_user(reddit, cursor, connection, author, source, comment_obj)
+                        check_if_user_is_known(cursor, author, connection)
+                        add_strike(cursor, author, reason, source, connection)
+                        process_user(reddit, cursor, author, source, comment_obj)
                         pm.reply(gen_strike_table(author, amount_of_strikes, cursor))
                         pm.mark_read()
                     else:
