@@ -11,7 +11,7 @@ subreddit = config.get("SUBREDDIT", "NAME")
 
 moderators = []
 
-command_word = "!strike"# the space at the end is needed to correctly parse the reason from comment
+command_word = "!strike"
 
 subject_secret = "strike" # this must be the subject in order to strike someone privately by pming the bot
 
@@ -54,7 +54,7 @@ def check_if_user_is_known(cursor, author, connection):
         connection.commit()
 
 
-def process_user(reddit, cursor, connection, author, source, comment_obj):
+def process_user(reddit, cursor, author, source, comment_obj):
     global amount_of_strikes
     amount_of_strikes = count_amount_of_strikes(cursor, author)
     if amount_of_strikes:
@@ -73,14 +73,14 @@ def process_user(reddit, cursor, connection, author, source, comment_obj):
 
 
 
-def scan_comments(reddit, cursor, connection, comment_obj): ##TODO: need to add scanning of inbox too for manual strikes
-    ## FIXME: need to get both for loops to work at the same time so that both the comments and the inbox are scanned when using the bot
+def scan_comments(reddit, cursor, connection, comment_obj):
+
 
     pm_err_msg = f"""Sorry, I didn't understand your message!\n\n
-    Please make sure you are using the proper syntax and subject!\n\n
-    Subject must be "strike" (No quotes, Not case sensitive.)\n\n
-    !strike u/username <reason> <link to rule breaking content>\n\n
-    Username is not case sensitive. Source URL must contain 'reddit.com'."""
+Please make sure you are using the proper syntax and subject!\n\n
+Subject must be "strike" (No quotes, Not case sensitive.)\n\n
+!strike u/username <reason> <link to rule breaking content>\n\n
+Username is not case sensitive. Source URL must contain 'reddit.com'."""
 
     for comment in comment_obj.stream.comments(skip_existing=True):
         body = comment.body
@@ -96,7 +96,7 @@ def scan_comments(reddit, cursor, connection, comment_obj): ##TODO: need to add 
                     reason = "<None Given>"
                 check_if_user_is_known(cursor, author, connection)
                 add_strike(cursor, author, reason, source, connection)
-                process_user(reddit, cursor, connection, author, source, comment_obj)
+                process_user(reddit, cursor, author, source, comment_obj)
                 bot_comment = comment.reply(gen_strike_table(author, amount_of_strikes, cursor))
                 bot_comment.mod.distinguish(how="yes", sticky=False)
 
@@ -120,7 +120,7 @@ def scan_comments(reddit, cursor, connection, comment_obj): ##TODO: need to add 
                             break
                         check_if_user_is_known(cursor, author, connection)
                         add_strike(cursor, author, reason, source, connection)
-                        process_user(reddit, cursor, connection, author, source, comment_obj)
+                        process_user(reddit, cursor, author, source, comment_obj)
                         pm.reply(gen_strike_table(author, amount_of_strikes, cursor))
                         pm.mark_read()
                     else:
