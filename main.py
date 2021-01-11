@@ -4,18 +4,13 @@ import sqlite3 as sq
 import configparser
 import prawcore.exceptions
 
+
 config = configparser.ConfigParser()
 config.read("config.ini")
-
 subreddit = config.get("SUBREDDIT", "NAME")
-
 moderators = []
-
 command_word = "!strike"
-
 subject_secret = "strike" # this must be the subject in order to strike someone privately by pming the bot
-
-
 
 
 def add_strike(cursor, author, reason, source, connection):
@@ -30,19 +25,28 @@ def count_amount_of_strikes(cursor, author):
 
 
 def gen_strike_table(author, amnt, cursor):
-    amnt = amnt + 1
-    if amnt > 2:
-        reply_body = f"A strike has been given to u/{author} and it looks like they have 3 or more strikes!\n\nThey have been banned.\n\n Here are their current strikes:\n\n|Strike No.|Reason|Source|\n|:-:|:-:|:-:|\n"
+    if amnt >= 3:
+        reply_body = f"A strike has been given to u/{author} and it looks like they have exceeded 3 strikes!" \
+                     f"\n\nThey have been banned." \
+                     f"\n\n Here are their current strikes:" \
+                     f"\n\n|Strike No.|Reason|Source|" \
+                     f"\n|:-:|:-:|:-:|\n"
     else:
-        reply_body = f"A strike has been given to u/{author}!\n\n Here are their current strikes:\n\n|Strike No.|Reason|Source|\n|:-:|:-:|:-:|\n"
+        reply_body = f"A strike has been given to u/{author}!" \
+                     f"\n\n Here are their current strikes:" \
+                     f"\n\n|Strike No.|Reason|Source|" \
+                     f"\n|:-:|:-:|:-:|\n"
+
     cursor.execute("""SELECT source, reason From users INNER JOIN strikes on users.id = strikes.user_id WHERE username=:username""", {"username": author})
     list_of_sources = cursor.fetchall()
 
     i = 1
+    total_strikes = cursor.execute("""SELECT count(strikes.id) AS count From users INNER JOIN strikes on users.id = strikes.user_id""").fetchone()[0]
     for source, reason in list_of_sources:
         table_row = f"|{i}|{reason}|[Link]({source})|\n"
-        reply_body = reply_body + table_row
+        reply_body += table_row
         i += 1
+    reply_body += f"\n\n***\n\nI am a bot. | Total strikes given to u/{author}: {amnt} | Total strikes given out: {total_strikes}"
     return reply_body
 
 def check_if_user_is_known(cursor, author, connection):
@@ -87,9 +91,10 @@ Username is not case sensitive. Source URL must contain 'reddit.com'."""
         initiator = comment.author.name.lower()
         try:
             if command_word in body and initiator in moderators:
-                parent = comment.parent()
-                author = parent.author.name.lower()
-                source = parent.permalink
+                command_comment = comment
+                comment = comment.parent()
+                author = comment.author.name.lower()
+                source = comment.permalink
                 raw_reason = body[8:].split(" ")
                 reason = " ".join(raw_reason)
                 if reason == "":
@@ -99,8 +104,7 @@ Username is not case sensitive. Source URL must contain 'reddit.com'."""
                 process_user(reddit, cursor, author, source, comment_obj)
                 bot_comment = comment.reply(gen_strike_table(author, amount_of_strikes, cursor))
                 bot_comment.mod.distinguish(how="yes", sticky=False)
-
-
+                command_comment.mod.remove()
 
             for pm in reddit.inbox.unread():
                 subject = pm.subject.lower()
@@ -127,8 +131,6 @@ Username is not case sensitive. Source URL must contain 'reddit.com'."""
                         pm.reply(pm_err_msg)
                         pm.mark_read()
 
-
-
         except Exception as e:
             print(f"WARNING: Unknown Error! - {e}")
 
@@ -143,7 +145,12 @@ def initialise():
                              user_agent="3StrikesBot, created by u/ItsTheRedditPolice")
         comment_obj = reddit.subreddit(subreddit)
         user = reddit.user.me()
+        print(f"Strike Bot v1.0")
+        print(f"-"*30)
+        time.sleep(1)
         print(f"Signed in as: {user}")
+        print(f"Subreddit: r/{subreddit}\n")
+        time.sleep(0.5)
 
         ## Connect database - will create a new database if one does not exist!
         connection = sq.connect("users.db")
@@ -166,6 +173,5 @@ def initialise():
         input()
 
 
-
-
-initialise()
+if __name__ == "__main__":
+    initialise()
