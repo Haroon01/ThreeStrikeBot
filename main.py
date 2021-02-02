@@ -3,6 +3,7 @@ import time
 import sqlite3 as sq
 import configparser
 import prawcore.exceptions
+from datetime import datetime
 
 
 config = configparser.ConfigParser()
@@ -11,7 +12,13 @@ subreddit = config.get("SUBREDDIT", "NAME")
 moderators = []
 command_word = "!strike"
 subject_secret = "strike" # this must be the subject in order to strike someone privately by pming the bot
+first_login = True
 
+
+def err_tag():
+    curr_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    tag = f"[{curr_time}] ERROR:"
+    return tag
 
 def add_strike(cursor, author, reason, source, connection):
     cursor.execute("""INSERT INTO strikes VALUES (NULL, :reason, :source, (SELECT id FROM users WHERE username=:username))""", {"username": author, "reason": reason, "source": source})
@@ -72,7 +79,7 @@ def process_user(reddit, cursor, author, source, comment_obj):
             reddit.subreddit(subreddit).message("A user has reached or exceeded 3 strikes!", f"Hello!\n\nA user has reached 3 or more strikes and has been banned!\n\nHere was their final strike: {source}")
             comment_obj.banned.add(author, ban_reason="Exceeded 3 Strikes", ban_message="Automated ban due to exceeding 3 strikes. Contact the moderators if there has been a mistake.", note=f"Their final strike was {source}")
         except Exception as e:
-            print(f"ERROR: Couldn't ban user {author}. - {e}")
+            print(f"{err_tag} Couldn't ban user {author}. - {e}")
 
 
 
@@ -132,24 +139,29 @@ Username is not case sensitive. Source URL must contain 'reddit.com'."""
                         pm.mark_read()
 
         except Exception as e:
-            print(f"WARNING: Unknown Error! - {e}")
+            print(f"{err_tag} Unknown Error! - {e}")
 
 
 def initialise():
+    global first_login
     try:
+
+        print(f"Strike Bot v1.1")
+        print(f"-" * 30)
+        time.sleep(1)
         ## Sign into reddit account
         reddit = praw.Reddit(client_id=config.get("ACCOUNT", "CLIENT_ID"),
                              client_secret=config.get("ACCOUNT", "CLIENT_SECRET"),
                              username=config.get("ACCOUNT", "USERNAME"),
                              password=config.get("ACCOUNT", "PASSWORD"),
                              user_agent="3StrikesBot, created by u/ItsTheRedditPolice")
+
+        if first_login: # if not logging back in from an error, show initial messages
+            user = reddit.user.me()
+            time.sleep(1)
+            print(f"Signed in as: {user}")
+            print(f"Subreddit: r/{subreddit}\n")
         comment_obj = reddit.subreddit(subreddit)
-        user = reddit.user.me()
-        print(f"Strike Bot v1.0")
-        print(f"-"*30)
-        time.sleep(1)
-        print(f"Signed in as: {user}")
-        print(f"Subreddit: r/{subreddit}\n")
         time.sleep(0.5)
 
         ## Connect database - will create a new database if one does not exist!
@@ -161,17 +173,23 @@ def initialise():
         ## Get a list of current moderators
         for mod in reddit.subreddit(subreddit).moderator():
             moderators.append(str(mod).lower())
-        print("Bot is now running!")
+        curr_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{curr_time}] Bot is now running!")
+        first_login = False
         ## Grab comments
         scan_comments(reddit, cursor, connection, comment_obj)
 
     except (prawcore.exceptions.OAuthException, prawcore.exceptions.ResponseException) as e:
-        print(f"WARNING: Could not log in to the Reddit account. Make sure the details are correct!\nPress any key to exit.\n\nError: {e}")
-        input()
+        if first_login:
+            print(f"{err_tag()} Could not log in to the Reddit account. ({e}) Make sure the details are correct!\nPress any key to exit.")
+            input()
+        else:
+            print(f"{err_tag()} Unable to access user account. ({e}) Trying Again in 10 seconds...")
+            time.sleep(10)
+            initialise()
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f"{err_tag()} {e}")
         input()
-
 
 if __name__ == "__main__":
     initialise()
